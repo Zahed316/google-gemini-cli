@@ -1,0 +1,47 @@
+{
+  "name": "google-gemini-cli",
+  "version": "1.0.0",
+  "description": "Universal CLI bridge and Node.js SDK for Google Gemini web client via Chrome DevTools Protocol. Supports Gemini Argon, Pro, Flash, Thinking depth, headless execution, multi-account rotation, and conversation management.",
+  "main": "src/index.js",
+  "bin": {
+    "gemini": "./bin/gemini.js",
+    "gemini-cli": "./bin/gemini.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Zahed316/google-gemini-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Zahed316/google-gemini-cli/issues"
+  },
+  "homepage": "https://github.com/Zahed316/google-gemini-cli#readme",
+  "keywords": [
+    "gemini",
+    "gemini-cli",
+    "gemini-argon",
+    "google-gemini",
+    "gemini-pro",
+    "gemini-flash",
+    "ai-cli",
+    "cdp",
+    "playwright",
+    "headless",
+    "automation",
+    "llm-cli",
+    "multi-account",
+    "rate-limit-bypass",
+    "terminal-ai"
+  ],
+  "author": "Zahed Rastgar",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "node tests/test-driver.js",
+    "lint": "node -c src/index.js src/gemini-driver.js src/profile-manager.js bin/gemini.js"
+  },
+  "optionalDependencies": {
+    "playwright": ">=1.40.0"
+  }
+}

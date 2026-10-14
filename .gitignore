@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Credentials, tokens, keys & sensitive session files
+.env
+.env.*
+*.local
+*.key
+*.pem
+*.crt
+*.cert
+*.p12
+*.pfx
+credentials*
+secrets*
+token*
+auth*
+id_rsa*
+*.lic
+
+# Chrome data directories & databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.heapsnapshot
+*.trace
+Crashpad/
+Crash Reports/
+Default/
+Profile */
+Singleton*
+*.sock
+
+# Logs & temp
+*.log
+*.tmp
+tmp/
+temp/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude & Harness artifacts
+.claude/
+.superpowers/
+.remember/
+.scratch/
+.cache/
+.config/
