@@ -6,8 +6,10 @@ module.exports = {
   listConversations: driver.listConversations,
   getConversationTranscript: driver.getConversationTranscript,
   deleteConversation: driver.deleteConversation,
+  deleteConversationInternal: driver.deleteConversationInternal,
   ensureChrome: driver.ensureChrome,
   stopChrome: driver.stopChrome,
+  isCdpReady: driver.isCdpReady,
   getRunningChromeMode: driver.getRunningChromeMode,
   getRunningChromeProfile: driver.getRunningChromeProfile,
   profileManager

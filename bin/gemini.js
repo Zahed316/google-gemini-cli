@@ -32,6 +32,9 @@ Options:
   --view <index|id>        View conversation transcript
   -d, --delete <index|id>  Delete specific conversation
   -y, --yes                Skip confirmation for deletion
+  -e, --ephemeral          Auto-delete conversation after completion (zero sidebar clutter)
+  --format <format>        Output format ('text' or 'ndjson' for agent harnesses)
+  --doctor                 Run diagnostic health checks on Chrome, CDP, and profiles
   --headless [mode]        Run in headless mode: 'xvfb' (default) or 'native' (--headless=new)
   --visible                Force visible browser window (overrides GEMINI_HEADLESS)
   --restart                Restart browser instance in the selected mode
@@ -124,6 +127,9 @@ async function main() {
         delete: { type: 'string', short: 'd' },
         json: { type: 'boolean' },
         yes: { type: 'boolean', short: 'y' },
+        ephemeral: { type: 'boolean', short: 'e' },
+        format: { type: 'string' },
+        doctor: { type: 'boolean' },
         headless: { type: 'string' },
         visible: { type: 'boolean' },
         restart: { type: 'boolean' },
@@ -146,6 +152,68 @@ async function main() {
 
   if (values.version) {
     console.log(VERSION);
+    process.exit(0);
+  }
+
+  if (values.doctor || (positionals.length === 1 && positionals[0] === 'doctor')) {
+    let driver;
+    try {
+      driver = require(DRIVER_PATH);
+    } catch (err) {
+      console.error('Error:', `Failed to load Gemini driver: ${err.message}`);
+      process.exit(1);
+    }
+
+    console.log('==> Running google-gemini-cli Doctor...\n');
+    console.log(`[✓] Node.js Version: ${process.version}`);
+
+    const { execSync } = require('child_process');
+    const fs = require('fs');
+
+    const chromeBin = '/opt/google/chrome/chrome';
+    if (fs.existsSync(chromeBin)) {
+      console.log(`[✓] Google Chrome: ${chromeBin}`);
+    } else {
+      console.log(`[!] Google Chrome: Not found at ${chromeBin}`);
+    }
+
+    let xvfbFound = false;
+    try {
+      execSync('which xvfb-run', { stdio: 'ignore' });
+      xvfbFound = true;
+    } catch {}
+    if (xvfbFound) {
+      console.log(`[✓] Virtual Display (Xvfb): Available for silent headless mode`);
+    } else {
+      console.log(`[!] Virtual Display (Xvfb): Not installed (run: sudo apt install xvfb)`);
+    }
+
+    const cdpUp = await driver.isCdpReady();
+    const runningMode = driver.getRunningChromeMode();
+    const runningProfile = driver.getRunningChromeProfile();
+    if (cdpUp) {
+      console.log(`[✓] CDP Port 9222: Connected (${runningMode || 'visible'} mode)`);
+      if (runningProfile) {
+        console.log(`[✓] Active Browser Data Dir: ${runningProfile.userDataDir}`);
+      }
+    } else {
+      console.log(`[-] CDP Port 9222: Offline (will auto-launch on demand)`);
+    }
+
+    const profiles = driver.profileManager.listProfiles();
+    console.log(`[✓] Discovered Profiles: ${profiles.length} profile(s) found`);
+    const active = profiles.find((p) => p.isActive);
+    if (active) {
+      console.log(`[✓] Default Profile: "${active.name}" (${active.email || 'no email'})`);
+    }
+
+    if (process.env.WAYLAND_DISPLAY) {
+      console.log(`[i] Desktop Display Server: Wayland (${process.env.WAYLAND_DISPLAY}) - Ozone isolation active`);
+    } else {
+      console.log(`[i] Desktop Display Server: X11 / Headless`);
+    }
+
+    console.log('\nDoctor status: Ready.');
     process.exit(0);
   }
 
@@ -361,6 +429,11 @@ async function main() {
 
   let hadOutput = false;
   let endsWithNewline = false;
+  const isNdjson = values.format === 'ndjson';
+
+  if (isNdjson) {
+    console.log(JSON.stringify({ event: 'start', model: values.model || 'default', thinking: values.thinking || 'default' }));
+  }
 
   try {
     const result = await sendPrompt({
@@ -371,16 +444,23 @@ async function main() {
       headless: driverOpts.headless,
       profile: driverOpts.profile,
       restart: driverOpts.restart,
+      ephemeral: Boolean(values.ephemeral),
       onChunk: (chunk) => {
         if (chunk) {
           hadOutput = true;
-          endsWithNewline = chunk.endsWith('\n');
-          process.stdout.write(chunk);
+          if (isNdjson) {
+            console.log(JSON.stringify({ event: 'chunk', text: chunk }));
+          } else {
+            endsWithNewline = chunk.endsWith('\n');
+            process.stdout.write(chunk);
+          }
         }
       }
     });
 
-    if ((result && !result.endsWith('\n')) || (hadOutput && !endsWithNewline)) {
+    if (isNdjson) {
+      console.log(JSON.stringify({ event: 'done', text: result }));
+    } else if ((result && !result.endsWith('\n')) || (hadOutput && !endsWithNewline)) {
       process.stdout.write('\n');
     }
   } catch (err) {

@@ -21,6 +21,9 @@ Interact with Google's most capable models—including **Gemini Argon**, **Gemin
 - 🔄 **Multi-Account & Profile Discovery:** Automatically scans and indexes all your local Chrome profiles (`~/.config/google-chrome*`). Seamlessly rotate between accounts when hitting quota limits.
 - ⏱️ **5-Hour Rate Limit Detection:** Automatically identifies disabled models, extracts the exact UI reset timestamp (e.g. `Limit resets Oct 15, 2:19 AM`), alerts you, and gracefully falls back to available models.
 - 🔍 **Full Conversation Observability:** List recent conversations (`-l`), dump complete transcripts in Markdown or JSON (`--view <id>`), and delete specific threads (`-d <id> -y`). *Strictly prohibits dangerous `--delete-all` operations for user safety.*
+- 🧹 **Ephemeral Agent Mode (`-e, --ephemeral`):** Stream responses directly to stdout and automatically clean up the conversation afterwards—leaving zero clutter in your Gemini sidebar.
+- 📡 **Agent Harness Ready (`--format ndjson`):** Streams structured, typed JSON events for integration into Claude Code, Cursor, OpenDevin, and custom autonomous harnesses.
+- 🩺 **Diagnostic Doctor (`gemini doctor`):** Instant verification of Chrome paths, CDP port 9222 status, Xvfb virtual displays, and profile authentication.
 - ⚡ **Streamlined Unix Pipeline:** Pipe files, logs, or command output (`cat file.js | gemini "refactor"`), with real-time streaming output to stdout.
 
 ---
@@ -210,6 +213,9 @@ Options:
   --view <index|id>        View conversation transcript
   -d, --delete <index|id>  Delete specific conversation
   -y, --yes                Skip confirmation for deletion
+  -e, --ephemeral          Auto-delete conversation after completion (zero sidebar clutter)
+  --format <format>        Output format ('text' or 'ndjson' for agent harnesses)
+  --doctor                 Run diagnostic health checks on Chrome, CDP, and profiles
   --headless [mode]        Run in headless mode: 'xvfb' (default) or 'native' (--headless=new)
   --visible                Force visible browser window (overrides GEMINI_HEADLESS)
   --restart                Restart browser instance in the selected mode

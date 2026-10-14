@@ -337,7 +337,8 @@ async function sendPrompt({
   onChunk = null,
   headless = null,
   profile = null,
-  restart = false
+  restart = false,
+  ephemeral = false
 }) {
   await ensureChrome({ headless, profile, restart });
 
@@ -424,6 +425,16 @@ async function sendPrompt({
       } else {
         stableStartTime = null;
       }
+    }
+
+    if (ephemeral) {
+      try {
+        const url = page.url();
+        const match = url.match(/\/app\/([a-zA-Z0-9_-]+)/);
+        if (match && match[1]) {
+          await deleteConversationInternal(page, match[1]).catch(() => {});
+        }
+      } catch {}
     }
 
     return lastText;
@@ -623,6 +634,43 @@ async function getConversationTranscript(idOrIndex, opts = {}) {
   }
 }
 
+async function deleteConversationInternal(page, targetId) {
+  await ensureSidebarOpen(page);
+  const item = await page.$(`gem-nav-list-item:has(a[href*="/app/${targetId}"])`);
+  if (!item) {
+    throw new Error(`Conversation element not found for ID: ${targetId}`);
+  }
+
+  await item.evaluate((el) => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
+  await page.waitForTimeout(100);
+  await item.hover();
+  await page.waitForTimeout(100);
+
+  const moreBtn = await item.$(
+    'button[aria-label*="More options" i], button:has([data-mat-icon-name="more_vert"])'
+  );
+  if (!moreBtn) {
+    throw new Error(`More options button not found for conversation: ${targetId}`);
+  }
+  await moreBtn.click();
+
+  const deleteMenuItem = await page.waitForSelector(
+    '[data-test-id="delete-button"], [role="menuitem"]:has-text("Delete")',
+    { timeout: 3000 }
+  );
+  await deleteMenuItem.click();
+
+  const dialog = await page.waitForSelector('mat-dialog-container', { timeout: 5000 });
+  const confirmBtn = await dialog.waitForSelector('button:has-text("Delete")', { timeout: 3000 });
+  await confirmBtn.click();
+
+  await dialog.waitForElementState('hidden', { timeout: 5000 }).catch(() => {});
+  await item.evaluate((el) => el.remove()).catch(() => {});
+  await page.waitForTimeout(500);
+
+  return { status: 'deleted', id: targetId };
+}
+
 async function deleteConversation(idOrIndex, opts = {}) {
   await ensureChrome(opts);
   const playwright = getPlaywright();
@@ -631,41 +679,7 @@ async function deleteConversation(idOrIndex, opts = {}) {
     const page = await getGeminiPage(browser);
     const convs = await listConversationsInternal(page);
     const target = resolveConversation(convs, idOrIndex);
-
-    await ensureSidebarOpen(page);
-    const item = await page.$(`gem-nav-list-item:has(a[href*="/app/${target.id}"])`);
-    if (!item) {
-      throw new Error(`Conversation element not found for ID: ${target.id}`);
-    }
-
-    await item.evaluate((el) => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
-    await page.waitForTimeout(100);
-    await item.hover();
-    await page.waitForTimeout(100);
-
-    const moreBtn = await item.$(
-      'button[aria-label*="More options" i], button:has([data-mat-icon-name="more_vert"])'
-    );
-    if (!moreBtn) {
-      throw new Error(`More options button not found for conversation: ${target.id}`);
-    }
-    await moreBtn.click();
-
-    const deleteMenuItem = await page.waitForSelector(
-      '[data-test-id="delete-button"], [role="menuitem"]:has-text("Delete")',
-      { timeout: 3000 }
-    );
-    await deleteMenuItem.click();
-
-    const dialog = await page.waitForSelector('mat-dialog-container', { timeout: 5000 });
-    const confirmBtn = await dialog.waitForSelector('button:has-text("Delete")', { timeout: 3000 });
-    await confirmBtn.click();
-
-    await dialog.waitForElementState('hidden', { timeout: 5000 }).catch(() => {});
-    await item.evaluate((el) => el.remove()).catch(() => {});
-    await page.waitForTimeout(500);
-
-    return { status: 'deleted', id: target.id };
+    return await deleteConversationInternal(page, target.id);
   } finally {
     await browser.close();
   }
@@ -675,11 +689,13 @@ module.exports = {
   sendPrompt,
   ensureChrome,
   stopChrome,
+  isCdpReady,
   getRunningChromeMode,
   getRunningChromeProfile,
   listConversations,
   listConversationsInternal,
   getConversationTranscript,
   deleteConversation,
+  deleteConversationInternal,
   profileManager
 };
