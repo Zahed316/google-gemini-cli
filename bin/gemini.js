@@ -25,6 +25,7 @@ Options:
   -t, --thinking <level>   Thinking reasoning depth (e.g. low, medium, high)
   -n, --new                Start a new chat session
   -f, --file <path>        Attach a file using Gemini's '+' (Upload & tools) button
+  -o, --download <path>    Download generated image or media created by Gemini to path
   -p, --profile <name|idx> Choose Google/Chrome profile by name, email, or index
   --list-profiles          List discovered Chrome profiles and accounts
   --set-profile <name|idx> Set default persistent profile
@@ -108,6 +109,10 @@ async function main() {
       } else {
         normalizedArgs.push('--login=');
       }
+    } else if (arg === '--output') {
+      normalizedArgs.push('--download');
+    } else if (arg.startsWith('--output=')) {
+      normalizedArgs.push(`--download=${arg.slice('--output='.length)}`);
     } else {
       normalizedArgs.push(arg);
     }
@@ -122,6 +127,7 @@ async function main() {
         thinking: { type: 'string', short: 't' },
         new: { type: 'boolean', short: 'n' },
         file: { type: 'string', short: 'f' },
+        download: { type: 'string', short: 'o' },
         profile: { type: 'string', short: 'p' },
         'list-profiles': { type: 'boolean' },
         'set-profile': { type: 'string' },
@@ -493,6 +499,7 @@ async function main() {
       restart: driverOpts.restart,
       ephemeral: Boolean(values.ephemeral),
       file: values.file || null,
+      download: values.download || null,
       waitForVerification: Boolean(values['wait-for-verification']),
       onChunk: (chunk) => {
         if (chunk) {
@@ -507,10 +514,18 @@ async function main() {
       }
     });
 
+    const textOutput = typeof result === 'object' && result !== null ? result.text : result;
+    const downloadedPath = typeof result === 'object' && result !== null ? result.downloaded : null;
+
     if (isNdjson) {
-      console.log(JSON.stringify({ event: 'done', text: result }));
-    } else if ((result && !result.endsWith('\n')) || (hadOutput && !endsWithNewline)) {
-      process.stdout.write('\n');
+      console.log(JSON.stringify({ event: 'done', text: textOutput, downloaded: downloadedPath }));
+    } else {
+      if ((textOutput && !textOutput.endsWith('\n')) || (hadOutput && !endsWithNewline)) {
+        process.stdout.write('\n');
+      }
+      if (downloadedPath) {
+        console.error(`[gemini] Downloaded media to: ${downloadedPath}`);
+      }
     }
   } catch (err) {
     console.error('Error:', err.message);

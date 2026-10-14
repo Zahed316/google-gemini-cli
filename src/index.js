@@ -14,6 +14,7 @@ module.exports = {
   getRunningChromeProfile: driver.getRunningChromeProfile,
   getBrowserStatus: driver.getBrowserStatus,
   attachFile: driver.attachFile,
+  downloadGeneratedMedia: driver.downloadGeneratedMedia,
   getUploadToolsButton: driver.getUploadToolsButton,
   checkRobotVerification: driver.checkRobotVerification,
   profileManager

@@ -434,7 +434,8 @@ async function sendPrompt({
   ephemeral = false,
   file = null,
   files = null,
-  waitForVerification = false
+  waitForVerification = false,
+  download = null
 }) {
   await ensureChrome({ headless, profile, restart });
 
@@ -477,13 +478,21 @@ async function sendPrompt({
     const textbox = await page.waitForSelector(textboxSelector, { timeout: 15000 });
     await textbox.click();
     await textbox.fill(prompt);
+    await page.waitForTimeout(200);
 
     const sendBtnSelector = 'button[aria-label*="Send message"], button[aria-label="Send message"]';
-    const sendBtn = await page.waitForSelector(sendBtnSelector, { timeout: 10000 });
-    await sendBtn.click();
+    const sendBtn = await page.$(sendBtnSelector);
+    if (sendBtn && !(await sendBtn.isDisabled().catch(() => true))) {
+      await sendBtn.click().catch(() => {});
+    }
+    await textbox.press('Enter').catch(() => {});
 
     await page.waitForFunction(
-      (count) => document.querySelectorAll('model-response').length > count,
+      (count) => {
+        const responses = document.querySelectorAll('model-response');
+        const stopBtn = document.querySelector('button[aria-label*="Stop" i], button[data-test-id="stop-button"]');
+        return responses.length > count || stopBtn !== null;
+      },
       initialCount,
       { timeout: 30000 }
     );
@@ -517,8 +526,17 @@ async function sendPrompt({
 
       const stopButton = await page.$('button[aria-label*="Stop"], button[aria-label*="stop"]');
 
+      const hasFinishedContent = await page.evaluate(() => {
+        const responses = document.querySelectorAll('model-response');
+        if (responses.length === 0) return false;
+        const latest = responses[responses.length - 1];
+        const hasText = (latest.querySelector('message-content')?.innerText || '').trim().length > 0;
+        const hasImg = latest.querySelector('img, generated-image, .image-container') !== null;
+        return hasText || hasImg;
+      });
+
       if (!stopButton) {
-        if (currentText !== null && currentText.trim().length > 0) {
+        if (hasFinishedContent) {
           if (stableStartTime === null) {
             stableStartTime = Date.now();
           } else if (Date.now() - stableStartTime >= STABLE_DURATION_MS) {
@@ -538,6 +556,18 @@ async function sendPrompt({
           await deleteConversationInternal(page, match[1]).catch(() => {});
         }
       } catch {}
+    }
+
+    let downloadedPath = null;
+    if (download) {
+      downloadedPath = await downloadGeneratedMedia(page, download).catch((err) => {
+        console.warn('[gemini] Download error:', err.message);
+        return null;
+      });
+    }
+
+    if (download) {
+      return { text: lastText, downloaded: downloadedPath };
     }
 
     return lastText;
@@ -824,6 +854,102 @@ async function attachFile(page, filePath) {
 
   await fileChooser.setFiles(resolvedPath);
   await page.waitForTimeout(1000);
+
+  // Wait up to 15s for file preview chip to appear and send button to become enabled
+  await page.waitForFunction(() => {
+    const hasChip = document.querySelector('[aria-label*="close" i], [aria-label*="remove" i], file-preview') !== null;
+    const btn = document.querySelector('button[aria-label*="Send message"], button[aria-label="Send message"]');
+    const btnReady = btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true';
+    return hasChip && btnReady;
+  }, { timeout: 15000 }).catch(() => {});
+}
+
+async function downloadGeneratedMedia(page, targetPath) {
+  const fs = require('fs');
+  const path = require('path');
+  const resolvedTarget = path.resolve(targetPath);
+
+  await page.waitForTimeout(1000);
+
+  // 1. Check for rendered image in latest response via canvas toDataURL
+  const imgDataUrl = await page.evaluate(() => {
+    const lastResp = document.querySelector('model-response:last-of-type');
+    if (!lastResp) return null;
+    const img = lastResp.querySelector(
+      'generated-image img, img.image, .image-container img, img[src*="blob:"], img[src*="googleusercontent"], img'
+    );
+    if (!img) return null;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width || 1024;
+      canvas.height = img.naturalHeight || img.height || 1024;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      return canvas.toDataURL('image/png');
+    } catch (e) {
+      return null;
+    }
+  });
+
+  if (imgDataUrl && imgDataUrl.startsWith('data:image/')) {
+    let dest = resolvedTarget;
+    if (fs.existsSync(resolvedTarget) && fs.statSync(resolvedTarget).isDirectory()) {
+      dest = path.join(resolvedTarget, `gemini-image-${Date.now()}.png`);
+    } else if (!path.extname(dest)) {
+      dest = `${dest}.png`;
+    }
+    const base64 = imgDataUrl.split(',')[1];
+    fs.writeFileSync(dest, Buffer.from(base64, 'base64'));
+    return dest;
+  }
+
+  // 2. Check for download button on latest response
+  const downloadBtn = await page.$(
+    'model-response:last-of-type button[aria-label*="Download" i], model-response:last-of-type a[download], [data-test-id*="download"]'
+  );
+
+  if (downloadBtn) {
+    try {
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 8000 }),
+        downloadBtn.click()
+      ]);
+      let dest = resolvedTarget;
+      if (fs.existsSync(resolvedTarget) && fs.statSync(resolvedTarget).isDirectory()) {
+        dest = path.join(resolvedTarget, download.suggestedFilename() || 'gemini-media');
+      }
+      await download.saveAs(dest);
+      return dest;
+    } catch {}
+  }
+
+  // 3. Check for generated image in latest response with data: URI
+  const imgData = await page.evaluate(() => {
+    const lastResp = document.querySelector('model-response:last-of-type');
+    if (!lastResp) return null;
+    const img = lastResp.querySelector(
+      'generated-image img, img[src*="googleusercontent"], img[src*="blob:"], .image-container img'
+    );
+    if (!img) return null;
+    return { src: img.src, alt: img.alt || '' };
+  });
+
+  if (imgData && imgData.src) {
+    let dest = resolvedTarget;
+    if (fs.existsSync(resolvedTarget) && fs.statSync(resolvedTarget).isDirectory()) {
+      dest = path.join(resolvedTarget, `gemini-media-${Date.now()}.png`);
+    } else if (!path.extname(dest)) {
+      dest = `${dest}.png`;
+    }
+
+    if (imgData.src.startsWith('data:')) {
+      const base64 = imgData.src.split(',')[1];
+      fs.writeFileSync(dest, Buffer.from(base64, 'base64'));
+      return dest;
+    }
+  }
+
+  return null;
 }
 
 async function getBrowserStatus(opts = {}) {
@@ -883,6 +1009,7 @@ module.exports = {
   getBrowserStatus,
   getUploadToolsButton,
   attachFile,
+  downloadGeneratedMedia,
   listConversations,
   listConversationsInternal,
   getConversationTranscript,

@@ -134,6 +134,9 @@ gemini -f path/to/document.pdf "Summarize this report in 5 bullet points"
 
 # Attach an image or code file
 gemini -f screenshot.png "Extract text and analyze UI layout"
+
+# Generate and download images or media created by Gemini
+gemini -m argon -o output.png "Generate an illustration of a futuristic data center"
 ```
 
 ### 6. Browser & Tab Inspection
@@ -242,6 +245,7 @@ Options:
   -t, --thinking <level>   Thinking reasoning depth (low, medium, high)
   -n, --new                Start a new chat session
   -f, --file <path>        Attach a file using Gemini's '+' (Upload & tools) button
+  -o, --download <path>    Download generated image or media created by Gemini to path
   -p, --profile <name|idx> Choose Google/Chrome profile by name, email, or index
   --list-profiles          List discovered Chrome profiles and accounts
   --set-profile <name|idx> Set default persistent profile
