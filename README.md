@@ -22,8 +22,12 @@ Interact with Google's most capable models—including **Gemini Argon**, **Gemin
 - ⏱️ **5-Hour Rate Limit Detection:** Automatically identifies disabled models, extracts the exact UI reset timestamp (e.g. `Limit resets Oct 15, 2:19 AM`), alerts you, and gracefully falls back to available models.
 - 🔍 **Full Conversation Observability:** List recent conversations (`-l`), dump complete transcripts in Markdown or JSON (`--view <id>`), and delete specific threads (`-d <id> -y`). *Strictly prohibits dangerous `--delete-all` operations for user safety.*
 - 🧹 **Ephemeral Agent Mode (`-e, --ephemeral`):** Stream responses directly to stdout and automatically clean up the conversation afterwards—leaving zero clutter in your Gemini sidebar.
+- 📎 **File Attachments via `+` (Upload & Tools):** Attach PDFs, documents, images, and code files with `-f, --file <path>`. Automates clicking Gemini's `+` button and intercepts native file choosers over CDP.
+- 🛡️ **Intelligent Anti-Bot & Robot Verification:** Proactively detects CAPTCHA and "unusual traffic" challenges. Cleanly pauses or aborts with explicit manual recovery steps without hanging headless automation.
+- 🧼 **Strict Tab Hygiene:** Reuses active browser sessions, prunes duplicate tabs, and closes dead `about:blank` pages to maintain optimal memory and CPU performance.
 - 📡 **Agent Harness Ready (`--format ndjson`):** Streams structured, typed JSON events for integration into Claude Code, Cursor, OpenDevin, and custom autonomous harnesses.
 - 🩺 **Diagnostic Doctor (`gemini doctor`):** Instant verification of Chrome paths, CDP port 9222 status, Xvfb virtual displays, and profile authentication.
+- 📊 **Browser & Tab Inspector (`gemini --status`):** Inspect active browser processes, running profile, CDP port connection, and open tabs with titles and URLs.
 - ⚡ **Streamlined Unix Pipeline:** Pipe files, logs, or command output (`cat file.js | gemini "refactor"`), with real-time streaming output to stdout.
 
 ---
@@ -120,6 +124,38 @@ gemini --visible "Show browser window during execution"
 > export GEMINI_HEADLESS=xvfb   # or 'native'
 > ```
 
+### 5. File Attachments & Upload Tools
+
+Attach documents, images, and code files directly using Gemini's `+` (Upload & tools) button via CDP:
+
+```bash
+# Attach a PDF or document for analysis
+gemini -f path/to/document.pdf "Summarize this report in 5 bullet points"
+
+# Attach an image or code file
+gemini -f screenshot.png "Extract text and analyze UI layout"
+```
+
+### 6. Browser & Tab Inspection
+
+Check what browser instances and tabs are open before taking actions:
+
+```bash
+# Human-readable summary of running Chrome, mode, profile, and tabs
+gemini --status
+
+# Machine-readable JSON output
+gemini --status --json
+```
+
+### 7. Google Robot Verification / Anti-Bot Protocol
+
+Google occasionally triggers automated security challenges ("Unusual traffic from your computer network" or CAPTCHA):
+
+- **Automatic Checkbox Attempt:** The CLI attempts to automatically check trivial reCAPTCHA checkboxes.
+- **Clean Headless Abort:** If an interactive CAPTCHA is presented while running headless, `google-gemini-cli` aborts immediately with explicit recovery instructions (`gemini --login <profile>` or `gemini -p <profile>`) rather than hanging indefinitely.
+- **Interactive Waiting Mode:** Use `--wait-for-verification` or `--visible` to pause up to 120 seconds while you solve the verification challenge in the browser window.
+
 ---
 
 ## 👥 Multi-Account & Profile Rotation
@@ -205,10 +241,12 @@ Options:
   -m, --model <name>       Model to use (argon, pro, flash, flash-lite)
   -t, --thinking <level>   Thinking reasoning depth (low, medium, high)
   -n, --new                Start a new chat session
+  -f, --file <path>        Attach a file using Gemini's '+' (Upload & tools) button
   -p, --profile <name|idx> Choose Google/Chrome profile by name, email, or index
   --list-profiles          List discovered Chrome profiles and accounts
   --set-profile <name|idx> Set default persistent profile
   --login [profile]        Launch visible Chrome window to log in to Google account
+  --status                 Inspect browser process, active profile, and open tabs
   -l, --list               List conversations
   --view <index|id>        View conversation transcript
   -d, --delete <index|id>  Delete specific conversation
@@ -216,6 +254,7 @@ Options:
   -e, --ephemeral          Auto-delete conversation after completion (zero sidebar clutter)
   --format <format>        Output format ('text' or 'ndjson' for agent harnesses)
   --doctor                 Run diagnostic health checks on Chrome, CDP, and profiles
+  --wait-for-verification  Wait for user to solve challenge if robot verification appears
   --headless [mode]        Run in headless mode: 'xvfb' (default) or 'native' (--headless=new)
   --visible                Force visible browser window (overrides GEMINI_HEADLESS)
   --restart                Restart browser instance in the selected mode

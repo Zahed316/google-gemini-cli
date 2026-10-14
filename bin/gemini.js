@@ -24,10 +24,12 @@ Options:
   -m, --model <name>       Model to use (e.g. argon, pro, flash)
   -t, --thinking <level>   Thinking reasoning depth (e.g. low, medium, high)
   -n, --new                Start a new chat session
+  -f, --file <path>        Attach a file using Gemini's '+' (Upload & tools) button
   -p, --profile <name|idx> Choose Google/Chrome profile by name, email, or index
   --list-profiles          List discovered Chrome profiles and accounts
   --set-profile <name|idx> Set default persistent profile
   --login [profile]        Launch visible Chrome window to log in to Google account
+  --status                 Inspect browser process, active profile, and open tabs
   -l, --list               List conversations
   --view <index|id>        View conversation transcript
   -d, --delete <index|id>  Delete specific conversation
@@ -35,6 +37,7 @@ Options:
   -e, --ephemeral          Auto-delete conversation after completion (zero sidebar clutter)
   --format <format>        Output format ('text' or 'ndjson' for agent harnesses)
   --doctor                 Run diagnostic health checks on Chrome, CDP, and profiles
+  --wait-for-verification  Wait for user to solve challenge if robot verification appears
   --headless [mode]        Run in headless mode: 'xvfb' (default) or 'native' (--headless=new)
   --visible                Force visible browser window (overrides GEMINI_HEADLESS)
   --restart                Restart browser instance in the selected mode
@@ -118,10 +121,12 @@ async function main() {
         model: { type: 'string', short: 'm' },
         thinking: { type: 'string', short: 't' },
         new: { type: 'boolean', short: 'n' },
+        file: { type: 'string', short: 'f' },
         profile: { type: 'string', short: 'p' },
         'list-profiles': { type: 'boolean' },
         'set-profile': { type: 'string' },
         login: { type: 'string' },
+        status: { type: 'boolean' },
         list: { type: 'boolean', short: 'l' },
         view: { type: 'string' },
         delete: { type: 'string', short: 'd' },
@@ -130,6 +135,7 @@ async function main() {
         ephemeral: { type: 'boolean', short: 'e' },
         format: { type: 'string' },
         doctor: { type: 'boolean' },
+        'wait-for-verification': { type: 'boolean' },
         headless: { type: 'string' },
         visible: { type: 'boolean' },
         restart: { type: 'boolean' },
@@ -301,6 +307,47 @@ async function main() {
     restart: Boolean(values.restart)
   };
 
+  if (values.status) {
+    let driver;
+    try {
+      driver = require(DRIVER_PATH);
+    } catch (err) {
+      console.error('Error:', `Failed to load Gemini driver: ${err.message}`);
+      process.exit(1);
+    }
+
+    try {
+      const status = await driver.getBrowserStatus(driverOpts);
+      if (values.json) {
+        console.log(JSON.stringify(status, null, 2));
+      } else {
+        console.log('==> Google Gemini Browser & Session Status\n');
+        console.log(`CDP Connected:     ${status.connected ? 'Yes (port 9222)' : 'No (offline)'}`);
+        console.log(`Running Mode:      ${status.mode || 'None'}`);
+        if (status.runningProfile) {
+          console.log(`Running Profile:   ${status.runningProfile.profileDir} (${status.runningProfile.userDataDir})`);
+        }
+        if (status.activeProfile) {
+          console.log(`Default Profile:   ${status.activeProfile.name} (${status.activeProfile.id})`);
+        }
+        console.log(`\nOpen Tabs (${status.tabs.length}):`);
+        if (status.tabs.length === 0) {
+          console.log('  No open browser tabs detected.');
+        } else {
+          console.log(`  ${'#'.padEnd(4)} ${'TITLE'.padEnd(40)} URL`);
+          for (const tab of status.tabs) {
+            const title = (tab.title || 'Untitled').slice(0, 38).padEnd(40);
+            console.log(`  ${String(tab.index).padEnd(4)} ${title} ${tab.url}`);
+          }
+        }
+      }
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  }
+
   if (values.list) {
     let driver;
     try {
@@ -445,6 +492,8 @@ async function main() {
       profile: driverOpts.profile,
       restart: driverOpts.restart,
       ephemeral: Boolean(values.ephemeral),
+      file: values.file || null,
+      waitForVerification: Boolean(values['wait-for-verification']),
       onChunk: (chunk) => {
         if (chunk) {
           hadOutput = true;

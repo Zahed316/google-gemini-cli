@@ -205,6 +205,11 @@ function resolveProfile(query) {
   };
 }
 
+function getActiveProfile() {
+  const profiles = listProfiles();
+  return profiles.find((p) => p.isActive) || profiles[0] || null;
+}
+
 function setActiveProfile(query) {
   const resolved = resolveProfile(query);
   const cfg = loadConfig();
@@ -224,6 +229,7 @@ function setActiveProfile(query) {
 module.exports = {
   listProfiles,
   resolveProfile,
+  getActiveProfile,
   setActiveProfile,
   loadConfig,
   saveConfig,

@@ -12,5 +12,9 @@ module.exports = {
   isCdpReady: driver.isCdpReady,
   getRunningChromeMode: driver.getRunningChromeMode,
   getRunningChromeProfile: driver.getRunningChromeProfile,
+  getBrowserStatus: driver.getBrowserStatus,
+  attachFile: driver.attachFile,
+  getUploadToolsButton: driver.getUploadToolsButton,
+  checkRobotVerification: driver.checkRobotVerification,
   profileManager
 };

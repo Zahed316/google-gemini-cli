@@ -186,23 +186,116 @@ async function ensureChrome(opts = {}) {
   throw new Error(`Chrome CDP failed to become ready on port 9222 within 15s (mode: ${targetMode || 'visible'})`);
 }
 
-async function getGeminiPage(browser) {
-  for (const ctx of browser.contexts()) {
-    for (const page of ctx.pages()) {
-      if (page.url().includes('google.com/sorry')) {
-        await page.close().catch(() => {});
-        continue;
-      }
-      if (page.url().startsWith('https://gemini.google.com')) {
-        return page;
+async function checkRobotVerification(page, options = {}) {
+  const url = page.url();
+  const isSorryUrl = url.includes('google.com/sorry');
+
+  let hasCaptchaText = false;
+  try {
+    hasCaptchaText = await page.evaluate(() => {
+      const text = document.body ? document.body.innerText.toLowerCase() : '';
+      return (
+        text.includes('unusual traffic from your computer network') ||
+        text.includes('systems have detected unusual traffic') ||
+        text.includes('our systems have detected unusual traffic') ||
+        text.includes('verify you\'re human') ||
+        text.includes('verify that you are not a robot') ||
+        document.querySelector('#captcha-form, iframe[src*="recaptcha"], iframe[src*="challenge"]') !== null
+      );
+    });
+  } catch {}
+
+  if (!isSorryUrl && !hasCaptchaText) {
+    return { verified: true };
+  }
+
+  console.warn('[gemini] Google Robot Verification (CAPTCHA) detected on:', url);
+
+  // 1. Attempt automatic click on standard checkbox if present
+  try {
+    for (const frame of page.frames()) {
+      if (frame.url().includes('recaptcha') || frame.url().includes('challenge')) {
+        const checkbox = await frame.$('.recaptcha-checkbox-border, #recaptcha-anchor, [role="checkbox"]');
+        if (checkbox) {
+          console.log('[gemini] Attempting to click verification checkbox...');
+          await checkbox.click();
+          await page.waitForTimeout(2000);
+          if (!page.url().includes('google.com/sorry')) {
+            console.log('[gemini] Verification checkbox succeeded.');
+            return { verified: true };
+          }
+        }
       }
     }
+  } catch {}
+
+  // 2. If running in visible mode or user opted into waiting
+  const runningMode = getRunningChromeMode();
+  if (runningMode === 'visible' || options.waitForVerification) {
+    console.warn('\n===============================================================');
+    console.warn('[!] ACTION REQUIRED: Please solve the Google verification in the browser.');
+    console.warn('Waiting up to 120 seconds for verification to complete...');
+    console.warn('===============================================================\n');
+    const startWait = Date.now();
+    while (Date.now() - startWait < 120000) {
+      await page.waitForTimeout(2000);
+      const curUrl = page.url();
+      if (curUrl.startsWith('https://gemini.google.com') && !curUrl.includes('google.com/sorry')) {
+        console.log('[gemini] Verification resolved by user! Continuing execution.');
+        return { verified: true };
+      }
+    }
+  }
+
+  // 3. Headless or timeout: stop work cleanly and alert user
+  const runningProfile = getRunningChromeProfile();
+  const profileHint = runningProfile ? `gemini --login ${runningProfile.profileDir}` : 'gemini --login';
+  throw new Error(
+    `Google Robot Verification (CAPTCHA) Required.\n` +
+    `Google flagged the connection with an anti-bot challenge on: ${url}\n\n` +
+    `Resolution Steps:\n` +
+    `1. Launch visible browser to complete the verification:\n` +
+    `   ${profileHint}   OR   gemini --visible "retry prompt"\n` +
+    `2. Or switch to an alternate Google profile:\n` +
+    `   gemini -p <other-profile> "your prompt"\n`
+  );
+}
+
+async function getGeminiPage(browser, options = {}) {
+  let geminiPage = null;
+  const pagesToClose = [];
+
+  for (const ctx of browser.contexts()) {
+    const pages = ctx.pages();
+    for (const page of pages) {
+      const url = page.url();
+      if (url.startsWith('https://gemini.google.com')) {
+        if (!geminiPage) {
+          geminiPage = page;
+        } else {
+          // Close duplicate Gemini tabs to prevent process and tab bloat
+          pagesToClose.push(page);
+        }
+      } else if (url === 'about:blank' && pages.length > 1) {
+        pagesToClose.push(page);
+      }
+    }
+  }
+
+  for (const p of pagesToClose) {
+    await p.close().catch(() => {});
+  }
+
+  if (geminiPage) {
+    await checkRobotVerification(geminiPage, options);
+    return geminiPage;
   }
 
   let ctx = browser.contexts()[0];
   if (!ctx) ctx = await browser.newContext();
   const page = await ctx.newPage();
   await page.goto(GEMINI_APP_URL, { waitUntil: 'domcontentloaded' });
+  await checkRobotVerification(page, options);
   return page;
 }
 
@@ -338,7 +431,10 @@ async function sendPrompt({
   headless = null,
   profile = null,
   restart = false,
-  ephemeral = false
+  ephemeral = false,
+  file = null,
+  files = null,
+  waitForVerification = false
 }) {
   await ensureChrome({ headless, profile, restart });
 
@@ -346,7 +442,7 @@ async function sendPrompt({
   const browser = await playwright.chromium.connectOverCDP(CDP_URL);
 
   try {
-    const page = await getGeminiPage(browser);
+    const page = await getGeminiPage(browser, { waitForVerification });
 
     if (isNewChat) {
       const newChatBtn = await page.$('a[aria-label*="New chat"], a[href="/app"], [data-test-id="side-nav-sparkle-button"]');
@@ -367,6 +463,13 @@ async function sendPrompt({
 
     if (model || thinking) {
       await selectModelAndThinking(page, model, thinking);
+    }
+
+    if (file || files) {
+      const fileList = Array.isArray(files) ? files : (file ? [file] : []);
+      for (const f of fileList) {
+        await attachFile(page, f);
+      }
     }
 
     const initialCount = (await page.$$('model-response')).length;
@@ -685,13 +788,101 @@ async function deleteConversation(idOrIndex, opts = {}) {
   }
 }
 
+async function getUploadToolsButton(page) {
+  return page.$(
+    'button[aria-label="Upload & tools"], button[aria-label*="Upload & tools" i], button[aria-label*="tools" i], button:has([data-mat-icon-name="plus"])'
+  );
+}
+
+async function attachFile(page, filePath) {
+  const fs = require('fs');
+  const path = require('path');
+  const resolvedPath = path.resolve(filePath);
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`File to attach not found: ${filePath}`);
+  }
+
+  const btn = await getUploadToolsButton(page);
+  if (!btn) {
+    throw new Error('Upload & tools (+) button not found on Gemini page.');
+  }
+
+  await btn.click();
+  await page.waitForTimeout(300);
+
+  const uploadItem = await page.$(
+    '[role="menuitem"]:has-text("Upload files"), .mat-mdc-menu-item:has-text("Upload files")'
+  );
+  if (!uploadItem) {
+    throw new Error('"Upload files" option not found in tools menu.');
+  }
+
+  const [fileChooser] = await Promise.all([
+    page.waitForEvent('filechooser', { timeout: 8000 }),
+    uploadItem.click()
+  ]);
+
+  await fileChooser.setFiles(resolvedPath);
+  await page.waitForTimeout(1000);
+}
+
+async function getBrowserStatus(opts = {}) {
+  const cdpUp = await isCdpReady();
+  const runningMode = getRunningChromeMode();
+  const runningProfile = getRunningChromeProfile();
+  const activeProfile = profileManager.getActiveProfile();
+
+  if (!cdpUp) {
+    return {
+      connected: false,
+      mode: null,
+      runningProfile: null,
+      activeProfile,
+      tabs: []
+    };
+  }
+
+  const playwright = getPlaywright();
+  const browser = await playwright.chromium.connectOverCDP(CDP_URL);
+  const tabs = [];
+
+  try {
+    for (const ctx of browser.contexts()) {
+      for (const [idx, page] of ctx.pages().entries()) {
+        const title = await page.title().catch(() => 'Untitled');
+        tabs.push({
+          index: idx + 1,
+          title: title.trim(),
+          url: page.url()
+        });
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+
+  return {
+    connected: true,
+    mode: runningMode || 'visible',
+    runningProfile,
+    activeProfile,
+    tabs
+  };
+}
+
 module.exports = {
+  getPlaywright,
+  getGeminiPage,
+  checkRobotVerification,
   sendPrompt,
   ensureChrome,
   stopChrome,
   isCdpReady,
   getRunningChromeMode,
   getRunningChromeProfile,
+  getBrowserStatus,
+  getUploadToolsButton,
+  attachFile,
   listConversations,
   listConversationsInternal,
   getConversationTranscript,
