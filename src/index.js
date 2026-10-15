@@ -15,6 +15,7 @@ module.exports = {
   getBrowserStatus: driver.getBrowserStatus,
   attachFile: driver.attachFile,
   downloadGeneratedMedia: driver.downloadGeneratedMedia,
+  dismissOverlays: driver.dismissOverlays,
   getUploadToolsButton: driver.getUploadToolsButton,
   checkRobotVerification: driver.checkRobotVerification,
   profileManager

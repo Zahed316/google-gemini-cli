@@ -288,6 +288,7 @@ async function getGeminiPage(browser, options = {}) {
 
   if (geminiPage) {
     await checkRobotVerification(geminiPage, options);
+    await dismissOverlays(geminiPage);
     return geminiPage;
   }
 
@@ -296,6 +297,7 @@ async function getGeminiPage(browser, options = {}) {
   const page = await ctx.newPage();
   await page.goto(GEMINI_APP_URL, { waitUntil: 'domcontentloaded' });
   await checkRobotVerification(page, options);
+  await dismissOverlays(page);
   return page;
 }
 
@@ -459,8 +461,17 @@ async function sendPrompt({
       }
     }
 
+    await dismissOverlays(page);
+
     const textboxSelector = 'div[contenteditable="true"][role="textbox"]';
-    await page.waitForSelector(textboxSelector, { timeout: 15000 });
+    let textbox;
+    try {
+      textbox = await page.waitForSelector(textboxSelector, { timeout: 15000 });
+    } catch (err) {
+      await dismissOverlays(page);
+      await checkRobotVerification(page, { waitForVerification });
+      textbox = await page.waitForSelector(textboxSelector, { timeout: 10000 });
+    }
 
     if (model || thinking) {
       await selectModelAndThinking(page, model, thinking);
@@ -475,7 +486,6 @@ async function sendPrompt({
 
     const initialCount = (await page.$$('model-response')).length;
 
-    const textbox = await page.waitForSelector(textboxSelector, { timeout: 15000 });
     await textbox.click();
     await textbox.fill(prompt);
     await page.waitForTimeout(200);
@@ -577,11 +587,50 @@ async function sendPrompt({
 }
 
 async function dismissOverlays(page) {
-  const backdrop = await page.$('.cdk-overlay-backdrop');
-  if (backdrop && (await backdrop.isVisible())) {
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(200);
-  }
+  try {
+    // 1. Google Cookie / Privacy Consent dialogs ("Before you continue to Google")
+    const consentBtn = await page.$(
+      'button:has-text("Accept all"), [aria-label*="Accept all" i], button:has-text("I agree"), [aria-label*="I agree" i]'
+    );
+    if (consentBtn) {
+      const isVisible = await consentBtn.isVisible().catch(() => false);
+      if (isVisible) {
+        await consentBtn.click().catch(() => {});
+        await page.waitForTimeout(400);
+      }
+    }
+
+    // 2. "Stay signed out" / "Dismiss" prompts
+    const staySignedOutBtn = await page.$(
+      'button:has-text("Stay signed out"), [aria-label*="Stay signed out" i], button:has-text("Dismiss"), button:has-text("No thanks")'
+    );
+    if (staySignedOutBtn) {
+      const isVisible = await staySignedOutBtn.isVisible().catch(() => false);
+      if (isVisible) {
+        await staySignedOutBtn.click().catch(() => {});
+        await page.waitForTimeout(300);
+      }
+    }
+
+    // 3. Onboarding / "Got it" / "Next" dialogs
+    const gotItBtn = await page.$(
+      'button:has-text("Got it"), [aria-label*="Got it" i], button:has-text("Done"), [aria-label*="Done" i], button:has-text("Continue")'
+    );
+    if (gotItBtn) {
+      const isVisible = await gotItBtn.isVisible().catch(() => false);
+      if (isVisible) {
+        await gotItBtn.click().catch(() => {});
+        await page.waitForTimeout(300);
+      }
+    }
+
+    // 4. Any leftover CDK backdrop
+    const backdrop = await page.$('.cdk-overlay-backdrop');
+    if (backdrop && (await backdrop.isVisible().catch(() => false))) {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(200);
+    }
+  } catch {}
 }
 
 async function ensureSidebarOpen(page) {
@@ -1000,6 +1049,7 @@ module.exports = {
   getPlaywright,
   getGeminiPage,
   checkRobotVerification,
+  dismissOverlays,
   sendPrompt,
   ensureChrome,
   stopChrome,
