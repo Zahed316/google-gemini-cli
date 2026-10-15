@@ -302,25 +302,34 @@ async function getGeminiPage(browser, options = {}) {
 }
 
 async function getPickerButton(page) {
-  return page.waitForSelector('button[aria-label*="Open mode picker"]', { timeout: 3000 });
+  const selector = 'button[aria-label*="mode picker" i], button.input-area-switch, button[aria-label*="currently" i]';
+  return page.waitForSelector(selector, { timeout: 8000 });
 }
 
 async function selectModelAndThinking(page, model, thinking) {
+  const isMenuOpen = async () => {
+    const menu = await page.$('gem-menu[role="menu"], [role="menuitem"]');
+    return menu ? await menu.isVisible().catch(() => false) : false;
+  };
+
   const openMenu = async () => {
+    if (await isMenuOpen()) return;
     const btn = await getPickerButton(page);
     await btn.click();
-    await page.waitForSelector('[role="menuitem"], .mat-mdc-menu-item', { timeout: 3000 });
-    await page.waitForTimeout(200);
+    await page.waitForSelector('[role="menuitem"], gem-menu-item', { timeout: 8000 });
+    await page.waitForTimeout(300);
   };
 
   if (model) {
     try {
       const btn = await getPickerButton(page);
-      const currentModeText = (await btn.innerText()).trim();
+      const btnText = (await btn.innerText()).trim().toLowerCase();
+      const btnAria = ((await btn.getAttribute('aria-label')) || '').toLowerCase();
+      const alreadySelected = btnText.includes(model.toLowerCase()) || btnAria.includes(model.toLowerCase());
 
-      if (!currentModeText.toLowerCase().includes(model.toLowerCase())) {
+      if (!alreadySelected) {
         await openMenu();
-        const items = await page.$$('[role="menuitem"], .mat-mdc-menu-item');
+        const items = await page.$$('gem-menu-item[data-mode-id], [role="menuitem"], .mat-mdc-menu-item');
         let clicked = false;
         for (const item of items) {
           const rawText = await item.innerText();
@@ -354,7 +363,7 @@ async function selectModelAndThinking(page, model, thinking) {
         if (!clicked) {
           await page.keyboard.press('Escape').catch(() => {});
         }
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(400);
       }
     } catch (err) {
       console.warn(`[gemini-driver] Failed to select model "${model}":`, err.message);
@@ -364,58 +373,74 @@ async function selectModelAndThinking(page, model, thinking) {
 
   if (thinking) {
     try {
-      const menuVisible = await page.$('[role="menuitem"], .mat-mdc-menu-item');
-      if (!menuVisible) {
+      const btn = await getPickerButton(page);
+      const btnText = (await btn.innerText()).trim().toLowerCase();
+      const btnAria = ((await btn.getAttribute('aria-label')) || '').toLowerCase();
+      const targetThinking = thinking.toLowerCase();
+      const alreadySelected =
+        new RegExp(`\\b${targetThinking}\\b`, 'i').test(btnText) ||
+        new RegExp(`\\b${targetThinking}\\b`, 'i').test(btnAria);
+
+      if (!alreadySelected) {
         await openMenu();
-      }
 
-      // Expand Thinking level submenu
-      const thinkingTrigger = await page.$(
-        '[value="thinking_level"], [role="menuitem"]:has-text("Thinking level"), gem-menu-item:has-text("Thinking level")'
-      );
-      if (thinkingTrigger) {
-        await thinkingTrigger.hover();
-        await thinkingTrigger.click();
-        await page.waitForTimeout(200);
-      } else {
-        console.warn('[gemini-driver] Thinking level trigger item not found in menu.');
-      }
-
-      const items = await page.$$('[role="menuitem"], .mat-mdc-menu-item');
-      let clicked = false;
-      for (const item of items) {
-        const rawText = await item.innerText();
-        const text = rawText.toLowerCase();
-        if (
-          !text.includes('thinking level') &&
-          (text.startsWith(thinking.toLowerCase()) || text.includes(thinking.toLowerCase()))
-        ) {
-          const isDisabled = await item.evaluate(
-            (el) =>
-              el.hasAttribute('disabled') ||
-              el.getAttribute('aria-disabled') === 'true' ||
-              el.classList.contains('mat-mdc-menu-item-disabled')
-          );
-          if (isDisabled) {
-            const resetMatch = rawText.match(/Limit resets [^\n]+/i);
-            console.warn(
-              `[gemini] Thinking level "${thinking}" is currently rate-limited (${resetMatch ? resetMatch[0] : 'limit reached'}). Continuing with available level.`
-            );
-          } else {
-            await item.click();
-            clicked = true;
+        // Expand Thinking level submenu
+        const thinkingTrigger = await page.$(
+          '[value="thinking_level"], [role="menuitem"]:has-text("Thinking level"), gem-menu-item:has-text("Thinking level")'
+        );
+        if (thinkingTrigger) {
+          await thinkingTrigger.hover();
+          await page.waitForTimeout(300);
+          const expanded = await thinkingTrigger.getAttribute('aria-expanded');
+          if (expanded !== 'true') {
+            await thinkingTrigger.click();
+            await page.waitForTimeout(300);
           }
-          break;
+
+          const submenuId = await thinkingTrigger.getAttribute('aria-controls');
+          const subSelector = submenuId
+            ? `#${submenuId} gem-menu-item, #${submenuId} [role="menuitem"], .submenu-container gem-menu-item, .submenu-container [role="menuitem"]`
+            : `.submenu-container gem-menu-item, [role="menuitem"]`;
+
+          const items = await page.$$(subSelector);
+          let clicked = false;
+          for (const item of items) {
+            const rawText = (await item.innerText()).trim();
+            const text = rawText.toLowerCase();
+            if (
+              !text.includes('thinking level') &&
+              (new RegExp(`\\b${targetThinking}\\b`, 'i').test(text) || text.startsWith(targetThinking))
+            ) {
+              const isDisabled = await item.evaluate(
+                (el) =>
+                  el.hasAttribute('disabled') ||
+                  el.getAttribute('aria-disabled') === 'true' ||
+                  el.classList.contains('mat-mdc-menu-item-disabled')
+              );
+              if (isDisabled) {
+                const resetMatch = rawText.match(/Limit resets [^\n]+/i);
+                console.warn(
+                  `[gemini] Thinking level "${thinking}" is currently rate-limited (${resetMatch ? resetMatch[0] : 'limit reached'}). Continuing with available level.`
+                );
+              } else {
+                await item.click();
+                clicked = true;
+              }
+              break;
+            }
+          }
+
+          if (!clicked) {
+            console.warn(`[gemini-driver] Thinking option "${thinking}" not found in menu.`);
+          }
+          await page.waitForTimeout(300);
+        } else {
+          console.warn('[gemini-driver] Thinking level trigger item not found in menu.');
         }
-      }
 
-      if (!clicked) {
-        console.warn(`[gemini-driver] Thinking option "${thinking}" not found in menu.`);
-      }
-
-      await page.waitForTimeout(200);
-      if (await page.$('[role="menuitem"], .mat-mdc-menu-item')) {
-        await page.keyboard.press('Escape').catch(() => {});
+        if (await isMenuOpen()) {
+          await page.keyboard.press('Escape').catch(() => {});
+        }
       }
     } catch (err) {
       console.warn(`[gemini-driver] Failed to select thinking level "${thinking}":`, err.message);
