@@ -173,11 +173,11 @@ gemini --list-profiles
 
 Output:
 ```text
-#    ID               NAME             EMAIL                        ACTIVE   USER DATA DIR
-1 *  flow             Zahed            persianstyle6@gmail.com      yes      ~/.config/google-chrome-flow
-2    main             Your Chrome      persianstyle6@gmail.com      no       ~/.config/google-chrome
-3    main-profile2    chatgpt          chatgptbehzad@gmail.com      no       ~/.config/google-chrome (Profile 2)
-4    beta             Beta             -                            no       ~/.config/google-chrome-beta
+#    ID               NAME               EMAIL                     ACTIVE   USER DATA DIR
+1 *  flow             Zahed            x6@gmail.com     yes      ~/.config/google-chrome-flow
+2    main             Your Chrome      y@gmail.com      no       ~/.config/google-chrome
+3    main-profile2    chatgpt          z@gmail.com      no       ~/.config/google-chrome (Profile 2)
+4    beta             Beta             -                no       ~/.config/google-chrome-beta
 ```
 
 ### Switch Profiles On The Fly
